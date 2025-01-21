@@ -44,6 +44,13 @@
 #define KUKA_KSS_HARDWARE_INTERFACE_
 #define TEST_COMM_TIMING
 
+// Communication protocol: Must match ROS_EKI_COMM_MODE in robot kuka_ros_driver.dat
+// Select the EKI protocol - Comment out the following line for binary
+//#define EKI_COMM_XML
+#ifndef EKI_COMM_XML
+#define EKI_COMM_BIN
+#endif
+
 // STL
 #include <vector>
 #include <string>
@@ -84,8 +91,11 @@
 #include <kuka_kss_hw_interface/comm_link_tcp_client.h>
 #include <kuka_kss_hw_interface/comm_link_udp_server.h>
 #include <kuka_kss_hw_interface/kuka_comm_handler_rsi.h>
+#ifdef EKI_COMM_XML
 #include <kuka_kss_hw_interface/kuka_comm_handler_eki.h>
-
+#elif defined(EKI_COMM_BIN)
+#include <kuka_kss_hw_interface/kuka_comm_handler_ekiBIN.h>
+#endif
 
 namespace kuka_kss_hw_interface
 {
@@ -177,7 +187,11 @@ private:
   int robot_state_id_;
   CommLink_UDPServer udp_server_;
   CommLink_TCPClient tcp_to_robot_;
+#ifdef EKI_COMM_XML
   std::unique_ptr<KukaCommHandlerEKI> rob_connection_;
+#elif defined(EKI_COMM_BIN)
+  std::unique_ptr<KukaCommHandlerEKIBIN> rob_connection_;
+#endif
   std::unique_ptr<KukaCommHandlerRSI> rsi_connection_;
   bool rsi_did_startup_;
   ros::Time rsi_remote_start_time_;

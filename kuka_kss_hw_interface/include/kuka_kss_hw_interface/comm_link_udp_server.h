@@ -85,6 +85,12 @@ public:
     virtual bool start();
 
     /**
+     * @brief Stop/disconnect the communication link.  Reset & prepare for reconnect.
+     * @return
+     */
+    virtual bool stop();
+
+    /**
      * @brief Try to receive data.  Will return immediately (non-blocking).
      * @param buffer - the memory area where data will be returned.
      * @return  - the size of the data retrieved, typically bytes. 0 if no data.

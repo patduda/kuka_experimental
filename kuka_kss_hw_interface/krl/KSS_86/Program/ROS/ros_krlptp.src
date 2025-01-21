@@ -1,5 +1,5 @@
 &ACCESS RVP
-&REL 74
+&REL 101
 &PARAM DISKPATH = KRC:\R1\Program\ROS
 DEF ros_krlptp ( )
    ; Software License Agreement (BSD License)
@@ -49,8 +49,8 @@ DEF ros_krlptp ( )
    nextMove = $AXIS_ACT_MEAS
    moveTime = 0.200
    ptp ROS_joint_pos_tgt
-   ROS_Runtime_Init()
-   ; Setup default motion params
+
+; Setup default motion params
    ; VEL & ACC may be reduced to give smooth motion at the default data rate
    ; For faster performance, these may also be increased
    ; Small/fast robots may need lower values

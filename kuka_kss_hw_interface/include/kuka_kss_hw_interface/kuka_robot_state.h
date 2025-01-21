@@ -122,6 +122,7 @@ public:
             InMotion:1,
             InError:1,
             OpMode:3;
+        unsigned int:23; // extra bits
     };
 
     union KukaStatusCode

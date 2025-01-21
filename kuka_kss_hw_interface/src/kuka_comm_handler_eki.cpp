@@ -39,6 +39,7 @@
 
 
 
+#include <kuka_kss_hw_interface/kuka_commands.h>
 #include <kuka_kss_hw_interface/kuka_comm_handler_eki.h>
 
 namespace kuka_kss_hw_interface
@@ -49,7 +50,7 @@ namespace kuka_kss_hw_interface
 KukaCommHandlerEKI::KukaCommHandlerEKI(CommunicationLink& comm, int id, int priority, const ros::NodeHandle& nh, std::string log_id):
     KukaCommHandler(comm, id, priority, nh, log_id),
     // Note: actual version is set below with setVersionInfo() in the constructor...
-    EKI_INTERFACE_VERSION_("V2002ROS"), version_num_str_("2002"), version_num_str_robot_("0"), did_init(false), cycleState_(UNKNOWN), did_receive_msg_(false),
+    EKI_INTERFACE_VERSION_("V0000ROS"), version_num_str_("2002"), version_num_str_robot_("0"), did_init(false), cycleState_(UNKNOWN), did_receive_msg_(false),
     cmd_corrections_str_(12), duration_(0.200)
 {
     ROS_INFO_STREAM_NAMED(logging_name_, "Starting Kuka communication link.");
@@ -68,20 +69,20 @@ KukaCommHandlerEKI::KukaCommHandlerEKI(CommunicationLink& comm, int id, int prio
     try {
         // Default XML response telegram
         std::string xmlStr;
-        xmlStr = R"(<ROS REQTYPE="CMD" ID="123456789012345"><Command dt="0.200"><Pos A1="-100.495300" A2="-100.244600" A3="-165.559500" A4="-112.204200" A5="-195.155600" A6="-113.062300" E1="1000.000000" E2="1000.000000" E3="1000.000000" E4="1000.000000" E5="1000.000000" E6="1000.000000"/></Command></ROS>)";
+        xmlStr = R"(<ROS REQTYPE="CMD-----" ID="123456789012345"><Command dt="0.200"><Pos A1="-100.495300" A2="-100.244600" A3="-165.559500" A4="-112.204200" A5="-195.155600" A6="-113.062300" E1="1000.000000" E2="1000.000000" E3="1000.000000" E4="1000.000000" E5="1000.000000" E6="1000.000000"/></Command></ROS>)";
         setXmlResponseTemplate(xmlStr);
 
         // TODO - Consider separating command & opstate to separte class as a ROS service
         std::string commandStr;
-        commandStr = R"(<ROS REQTYPE="COM" ID="123456789012345">NA</ROS>)";
+        commandStr = R"(<ROS REQTYPE="COM-----" ID="123456789012345">NA</ROS>)";
         setXmlCommandTemplate(commandStr);
 
         std::string opStateStr;
-        opStateStr = R"(<ROS REQTYPE="CHANGE" ID="123456789012345"><OpState Type="RSI4ms_Pos">NA</OpState></ROS>)";
+        opStateStr = R"(<ROS REQTYPE="CHANGE--" ID="123456789012345"><OpState Type="RSI4ms_Pos">NA</OpState></ROS>)";
         setXmlOpStateTemplate(opStateStr);
 
         // Must be of the form VnnnnROS
-        setVersionInfo("V2003ROS");
+        setVersionInfo("V2004ROS");
     } catch (std::exception& ex){
         ROS_ERROR_STREAM_NAMED(logging_name_, "Error setting response XML.");
         ROS_ERROR_STREAM_NAMED(logging_name_, ex.what());
@@ -101,7 +102,7 @@ void KukaCommHandlerEKI::setVersionInfo(std::string ver)
     // Extract the version number from format VnnnnROS
     version_num_str_ = EKI_INTERFACE_VERSION_.substr(1,4);
 
-    ROS_INFO_NAMED(logging_name_,"Kuka ROS EKI interface version %s.", EKI_INTERFACE_VERSION_.c_str());
+    ROS_INFO_NAMED(logging_name_,"Kuka ROS EKI XML interface version %s.", EKI_INTERFACE_VERSION_.c_str());
 }
 
 
@@ -141,10 +142,11 @@ bool KukaCommHandlerEKI::startComm()
     {
         state_ = LISTENING;
         cycleState_ = CycleState::WAITING;
+        ROS_INFO_STREAM_NAMED(logging_name_, "Started Kuka EKI communication link.");
     }
     else
     {
-        ROS_WARN_STREAM_NAMED(logging_name_, "startComm connection unsuccessful.");
+        ROS_WARN_STREAM_NAMED(logging_name_, "Kuka EKI startComm connection unsuccessful.");
     }
     return(started);
 }
@@ -152,12 +154,13 @@ bool KukaCommHandlerEKI::startComm()
 
 bool KukaCommHandlerEKI::shutdownComm()
 {
-    // TODO: handle disconnect.
-    return(false);
+    bool success = comm_link_.stop();
 
     state_ = LISTENING;
     cycleState_ = CycleState::INIT;
     did_init = false;
+    ROS_INFO_STREAM_NAMED(logging_name_, "Stopped Kuka RSI communication link.");
+    return(success);
 }
 
 bool KukaCommHandlerEKI::checkForReceive()
@@ -269,6 +272,9 @@ bool KukaCommHandlerEKI::parseReceivedMessage()
 
     try {
         bool messageHandled=false;
+        //TODO: Change XML structure to use common command names between XML tags & binary.
+        kuka_commands& cmdNames = kuka_commands::getInstance();
+
 
         // Handle the robot position state update
         if (messageType == "State")
@@ -334,6 +340,8 @@ bool KukaCommHandlerEKI::parseReceivedMessage()
             //cart_position_[4] = stod_safe(parsedXML.get("/Robot/State/RIst@B"));
             //cart_position_[5] = stod_safe(parsedXML.get("/Robot/State/RIst@C"));
 
+            cmdNames.setTimestamp(kuka_commands::CommandType::ROSC_SjState, cur_ipoc);
+
             if (!did_init)
             {
                 // Initialize the command positions with the actual position read above
@@ -354,27 +362,31 @@ bool KukaCommHandlerEKI::parseReceivedMessage()
 
             std::lock_guard<std::mutex> lock(KukaRobotStateManager::getRobot(rob_id_).getStatusMutex());
 
-            ROS_DEBUG_NAMED(logging_name_, "Received Status Message: %s", recv_xml_.c_str());
+            ROS_INFO_NAMED(logging_name_, "Received Status Message: %s", recv_xml_.c_str());
+
+            unsigned long long cur_ipoc = std::stoull(parsedXML.get("/Robot/Status@IPOC"));
             KukaRobotStateManager::getRobot(rob_id_).setOpMode( stoi(parsedXML.get("/Robot/Status@Mode")));
 
             std::string ctrlType = parsedXML.get("/Robot/Status@OpState");
             KukaRobotStateManager::getRobot(rob_id_).setRobOpState(ctrlType);
 
-            KukaRobotState::KukaStatus curStat;
-            curStat.Estop = (int)(1 == stoi(parsedXML.get("/Robot/Status@EStop")));
-            curStat.GuardStop = (int)(1 == stoi(parsedXML.get("/Robot/Status@GuardStop")));
-            curStat.DrivesPowered = (int)(1 == stoi(parsedXML.get("/Robot/Status@DrivesPowered")));
-            curStat.MotionPossible = (int)(1 == stoi(parsedXML.get("/Robot/Status@MotionPossible")));
-            curStat.InMotion = (int)(1 == stoi(parsedXML.get("/Robot/Status@InMotion")));
-            curStat.InError = (int)(1 == stoi(parsedXML.get("/Robot/Status@InError")));
-            KukaRobotStateManager::getRobot(rob_id_).setStatus(curStat);
-
             KukaRobotState::KukaStatusCode curStatCode;
-            curStatCode.stat = curStat;
-            ROS_DEBUG_NAMED(logging_name_, "Set status: %d", curStatCode.code);
+            curStatCode.code = 0;
+
+            curStatCode.stat.Estop = (int)(1 == stoi(parsedXML.get("/Robot/Status@EStop")));
+            curStatCode.stat.GuardStop = (int)(1 == stoi(parsedXML.get("/Robot/Status@GuardStop")));
+            curStatCode.stat.DrivesPowered = (int)(1 == stoi(parsedXML.get("/Robot/Status@DrivesPowered")));
+            curStatCode.stat.MotionPossible = (int)(1 == stoi(parsedXML.get("/Robot/Status@MotionPossible")));
+            curStatCode.stat.InMotion = (int)(1 == stoi(parsedXML.get("/Robot/Status@InMotion")));
+            curStatCode.stat.InError = (int)(1 == stoi(parsedXML.get("/Robot/Status@InError")));
+            KukaRobotStateManager::getRobot(rob_id_).setStatus(curStatCode.stat);
+
+            ROS_INFO_NAMED(logging_name_, "Set status: %u", curStatCode.code);
 
             int err = stoi(parsedXML.get("/Robot/Status@ErrorCode"));
             KukaRobotStateManager::getRobot(rob_id_).setErrorCode(err);
+
+            cmdNames.setTimestamp(kuka_commands::CommandType::ROSC_Sstatus, cur_ipoc);
         }
 
         // Handle command acknowledge status changes
@@ -457,6 +469,10 @@ bool KukaCommHandlerEKI::parseReceivedMessage()
                 KukaRobotStateManager::getRobot(rob_id_).setJointMotorMaxVel(j, maxRPM);
             }
 
+            cmdNames.setTimestamp(kuka_commands::CommandType::ROSC_SInit, cur_ipoc);
+            cmdNames.setTimestamp(kuka_commands::CommandType::ROSC_SInitMod, cur_ipoc);
+            cmdNames.setTimestamp(kuka_commands::CommandType::ROSC_SInitName, cur_ipoc);
+            cmdNames.setTimestamp(kuka_commands::CommandType::ROSC_SInitRobV, cur_ipoc);
             // TODO: perform startup check task.
             // - Verify ROS model matches actual robot
             // - Verify axis count is correct
@@ -510,6 +526,8 @@ void KukaCommHandlerEKI::setXmlResponseTemplate(std::string xmlStr)
 {
   response_XML_template_ = xmlStr;
   responseXML_->setXmlTemplate(response_XML_template_);
+  req_type_response_str_ = kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_CmdJpos);
+  responseXML_->set("/ROS@REQTYPE", (char *)req_type_response_str_.c_str());
 }
 
 std::string KukaCommHandlerEKI::getXmlResponseTemplate()
@@ -529,13 +547,15 @@ void KukaCommHandlerEKI::setXmlOpStateTemplate(std::string xmlStr)
 {
   opState_XML_template_ = xmlStr;
   opStateXML_->setXmlTemplate(opState_XML_template_);
+  req_type_opState_str_ = kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_Change);
+  opStateXML_->set("/ROS@REQTYPE", (char *)req_type_opState_str_.c_str());
 }
 
 bool KukaCommHandlerEKI::messagePrepareCommand(std::string commandID, unsigned long long ID)
 {
     try {
         command_str_ = commandID;
-        commandXML_->set("/ROS@REQTYPE", (char *)commandID.c_str());
+        commandXML_->set("/ROS@REQTYPE", (char *)command_str_.c_str());
         id_str_ = std::to_string(ID);
         commandXML_->set("/ROS@ID", (char *)id_str_.c_str());
 
@@ -557,7 +577,7 @@ bool KukaCommHandlerEKI::messagePrepareOpState(std::string opStateID, unsigned l
         opState_str_ = opStateID;
         opStateXML_->set("/ROS/OpState@Type", (char *)opState_str_.c_str());
         id_str_ = std::to_string(ID);
-        commandXML_->set("/ROS@ID", (char *)id_str_.c_str());
+        opStateXML_->set("/ROS@ID", (char *)id_str_.c_str());
 
         std::lock_guard<std::mutex> lockBuff(buffer_mutex_);
         send_comm_buff_.append(opStateXML_->asXml());
@@ -602,7 +622,7 @@ bool KukaCommHandlerEKI::messagePrepare()
         cmd_corrections_str_[10] = std::to_string(KukaRobotStateManager::getRobot(rob_id_).getCommandJointPositionKuka(10));
         cmd_corrections_str_[11] = std::to_string(KukaRobotStateManager::getRobot(rob_id_).getCommandJointPositionKuka(11));
 
-        //responseXML_->set("/ROS@REQTYPE", "CMD");
+        //responseXML_->set("/ROS@REQTYPE", "CmdJpos-");
         responseXML_->set("/ROS@ID", (char *)id_str_.c_str());
         responseXML_->set("/ROS/Command@dt", (char *)duration_str_.c_str());
         responseXML_->set("/ROS/Command/Pos@A1", (char *)cmd_corrections_str_[0].c_str());

@@ -8,7 +8,7 @@
          <ENVIRONMENT>Submit</ENVIRONMENT>   <!-- Server run via robot interpreter -->
          <BUFFERING Limit="512" />            <!-- Allow buffering of up to 512 messages (system max) -->
          <ALIVE Set_Flag="105" />               <!-- Use $flag[1] to indicate alive/good connection status -->
-         <IP>172.31.1.148</IP> <!-- IP address for EKI interface on robot controller (KRC) -->
+         <IP>172.32.1.10</IP> <!-- IP address for EKI interface on robot controller (KRC) -->
          <PORT>54600</PORT>                   <!-- Port of EKI interface on robot controller (in [54600, 54615]) -->
          <PROTOCOL>TCP</PROTOCOL>             <!-- Use TCP protocol -->
          <MESSAGES Logging="error" Display="disabled" />
@@ -110,6 +110,7 @@
          <ELEMENT Tag="Robot/State/RobotCommand/@Size"/>  <!-- Number of elements currently in command buffer -->
          
          <!-- ROS Status Info  ========================================= -->
+         <ELEMENT Tag="Robot/Status/@IPOC"/>
          <ELEMENT Tag="Robot/Status/@Mode"/>
          <ELEMENT Tag="Robot/Status/@OpState"/>
          <ELEMENT Tag="Robot/Status/@EStop"/>

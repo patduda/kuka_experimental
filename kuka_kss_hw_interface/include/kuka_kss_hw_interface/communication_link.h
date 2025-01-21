@@ -73,10 +73,16 @@ public:
     virtual bool setup() = 0;
 
     /**
-     * @brief Start the communicatin link.  Connect or prepare for communication.
+     * @brief Start the communication link.  Connect or prepare for communication.
      * @return
      */
     virtual bool start() = 0;
+
+    /**
+     * @brief Stop/disconnect the communication link.  Reset & prepare for reconnect.
+     * @return
+     */
+    virtual bool stop() = 0;
 
     /**
      * @brief Try to receive data.  This should be non-blocking and return immediately.

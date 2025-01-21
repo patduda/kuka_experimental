@@ -58,6 +58,7 @@ KukaRobotState::KukaRobotState():
     current_op_state_.control_state = kuka_msgs::ControlState::RosControl_KRL_PTP;
 }
 
+
 KukaRobotState::~KukaRobotState()
 {
 

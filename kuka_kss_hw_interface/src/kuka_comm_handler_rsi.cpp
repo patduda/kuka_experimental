@@ -74,11 +74,12 @@ KukaCommHandlerRSI::KukaCommHandlerRSI(CommunicationLink& comm, int id, int prio
         setXmlResponseTemplate(xmlStr);
 
         // Must be of the form VnnnnROS
-        setVersionInfo("V2003ROS");
+        setVersionInfo("V2004ROS");
     } catch (std::exception& ex){
         ROS_ERROR_STREAM_NAMED(logging_name_, "Error setting response XML.");
         ROS_ERROR_STREAM_NAMED(logging_name_, ex.what());
     }
+    state_ = DISCONNECTED;
 }
 
 
@@ -136,20 +137,20 @@ bool KukaCommHandlerRSI::startComm()
         state_ = LISTENING;
         cycleState_ = CycleState::WAITING;
     }
-    ROS_INFO_STREAM_NAMED(logging_name_, "Started RSI communication link.");
+    ROS_INFO_STREAM_NAMED(logging_name_, "Started Kuka RSI communication link.");
     return(started);
 }
 
 
 bool KukaCommHandlerRSI::shutdownComm()
 {
-    // TODO: handle disconnect.
-    return(false);
+    bool success = comm_link_.stop();
 
-    state_ = LISTENING;
+    state_ = DISCONNECTED;
     cycleState_ = CycleState::INIT;
     did_init = false;
-    ROS_INFO_STREAM_NAMED(logging_name_, "Stopped RSI communication link.");
+    ROS_INFO_STREAM_NAMED(logging_name_, "Stopped Kuka RSI communication link.");
+    return(success);
 }
 
 bool KukaCommHandlerRSI::checkForReceive()

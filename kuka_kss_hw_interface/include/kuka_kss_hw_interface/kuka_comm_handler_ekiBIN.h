@@ -37,11 +37,10 @@
  * Author: Pat Duda <Pat.Duda@kuka.com>
  */
 
-#ifndef KUKA_COMM_HANDLER_EKI_H
-#define KUKA_COMM_HANDLER_EKI_H
+#ifndef KUKA_COMM_HANDLER_EKIBIN_H
+#define KUKA_COMM_HANDLER_EKIBIN_H
 
 #include <kuka_kss_hw_interface/kuka_comm_handler.h>
-#include <kuka_kss_hw_interface/XmlTemplateXpath.h>
 
 
 namespace kuka_kss_hw_interface
@@ -49,22 +48,22 @@ namespace kuka_kss_hw_interface
 
 /**
  * @brief The KukaCommHandlerEKI class handles Ethernet KRL (EKI) communication to the Kuka
- * which uses a TCP Client for communication and XML formatted packets for data exchange.
+ * which uses a TCP Client for communication and binary formatted packets for data exchange.
  * The Kuka robot implements a TCP Server in the background SPS to handle communication.
  */
-class KukaCommHandlerEKI : public KukaCommHandler
+class KukaCommHandlerEKIBIN : public KukaCommHandler
 {
 public:
     /**
-     * @brief KukaCommHandlerEKI
+     * @brief KukaCommHandlerEKIBIN
      * @param comm - Must be a CommLink_UDPServer object.  Be sure to properly use setupParams before.
      * @param rob_id - the int ID of the robot state object in the KukaRobotStateManager
      * @param priority
      * @param nh
      * @param log_id
      */
-    KukaCommHandlerEKI(CommunicationLink& comm, int rob_id, int priority, const ros::NodeHandle& nh, std::string log_id);
-    virtual ~KukaCommHandlerEKI();
+    KukaCommHandlerEKIBIN(CommunicationLink& comm, int rob_id, int priority, const ros::NodeHandle& nh, std::string log_id);
+    virtual ~KukaCommHandlerEKIBIN();
 
     virtual bool setup();
     virtual bool startComm();
@@ -91,6 +90,7 @@ public:
     virtual bool messagePrepare();
     virtual bool messageSend();
 
+
     enum CycleState
     {
         UNKNOWN=-1,
@@ -109,45 +109,17 @@ public:
     CycleState getCycleState() {return cycleState_;}
 
     /**
-     * @brief setXmlResponseTemplate - Predefine an XML template for messages to the robot.
-     * A default template is already defined in the class
-     * @param xmlStr
-     */
-    void setXmlResponseTemplate(std::string xmlStr);
-
-    /**
-     * @brief setXmlCommandTemplate - Predefine an XML template for commands to the robot.
-     * A default template is already defined in the class
-     * @param xmlStr
-     */
-    void setXmlCommandTemplate(std::string xmlStr);
-
-    /**
-     * @brief setXmlOpStateTemplate - Predefine an XML template for sending OpState command to the robot.
-     * A default template is already defined in the class
-     * @param xmlStr
-     */
-    void setXmlOpStateTemplate(std::string xmlStr);
-
-    /**
-     * @brief getXmlResponseTemplate - Get the template string.  Version data is set separately so
-     * The template does not necessarily have the runtime version.
-     * @return
-     */
-    std::string getXmlResponseTemplate();
-
-    /**
      * @brief checkReceivedVersion - checks for a matching version in the received data.
      * parseReceivedMessage() must be called before this check.
      * @return
      */
     bool checkReceivedVersion();
 
-    /**
-     * @brief getReceivedXML - returns the full XML packet received from the robot.
-     * @return
-     */
-    std::string getReceivedXML() const {return recv_xml_;}
+//    /**
+//     * @brief getReceivedXML - returns the full XML packet received from the robot.
+//     * @return
+//     */
+//    std::string getReceivedXML() const {return recv_xml_;}
 
     /**
      * @brief getCommCycle - returns the receive to receive time interval
@@ -156,13 +128,22 @@ public:
     ros::Duration getCommCycle();
 
     /**
-     * @brief makeAxisID - creates a string ID for Kuka standard axis names A1-A6, E1-E6
-     * @param j - joint index 0-11
+     * @brief getResponseTime - The total response time from receive to send
      * @return
      */
-    std::string makeAxisID(int j);
+    ros::Duration getResponseTime();
 
+    /**
+     * @brief timeoutCheck - Measure time between messages for timeout
+     * @return
+     */
+    ros::Duration timeoutCheck();
 
+    /**
+     * @brief checkAck - Check if robot ack is received. Used for flow control of sent binary packets
+     * @return
+     */
+    bool checkAck();
 
 private:
     /**
@@ -175,42 +156,49 @@ private:
     std::string EKI_INTERFACE_VERSION_;
     std::string version_num_str_;
     std::string version_num_str_robot_;
+    int version_num_robot_;
+
+    enum CommandTypes
+    {
+        ROSC_Init=0,
+        ROSC_CmdJpos=1,
+        ROSC_Start=2,
+        ROSC_Stop=3,
+        ROSC_Reset=4,
+        ROSC_DrivesOn=5,
+        ROSC_DrivesOff=6,
+        ROSC_Change=7,
+        ROSC_Heartbeat=8,
+        ROSC_SInit=100,
+        ROSC_SInitName=101,
+        ROSC_SInitMod=102,
+        ROSC_SInitRobV=103,
+        ROSC_SjState=104,
+        ROSC_Sstatus=105,
+        ROSC_Sackn=106
+    };
 
     std::mutex buffer_mutex_;
     CycleState cycleState_;
     std::string recv_comm_buff_;
     std::string recv_msg_;
-    std::string recv_xml_;
+    //recv bin
+    std::string recv_bin_;
     bool did_receive_msg_;
 
-    std::string startStr_ ;
     std::string endStr_ ;
     size_t endStr_len_;
 
-    std::string send_comm_buff_;
-    // Changing data in a pre-parsed XML structure generates faster
-    std::string response_XML_template_;
-    std::unique_ptr<XmlTemplateXpath> responseXML_;
-
-    std::string command_XML_template_;
-    std::unique_ptr<XmlTemplateXpath> commandXML_;
     std::string command_str_;
 
-    std::string opState_XML_template_;
-    std::unique_ptr<XmlTemplateXpath> opStateXML_;
+    std::string str_messageType_;
+    int ackID_;
+    bool recvAck_;
+    std::string send_comm_buff_;
     std::string opState_str_;
-
-
 
     // EKI Specific robot state data
     bool did_init;
-    // NOTE: RapidXML requires persistent strings for set values
-    std::string req_type_response_str_;
-    std::string req_type_opState_str_;
-    std::string id_strCMD_;
-    std::string id_str_;
-    std::string duration_str_;
-    std::vector<std::string> cmd_corrections_str_;
 
     std::vector<double> cart_position_;
     double duration_;
@@ -218,8 +206,9 @@ private:
     // Track communication timing metrics
     std::chrono::time_point<std::chrono::steady_clock> t_received_last_;
     std::chrono::time_point<std::chrono::steady_clock> t_received_;
+    std::chrono::time_point<std::chrono::steady_clock> t_sent_;
 };
 
 } //namespace kuka_kss_hw_interface
 
-#endif // KUKA_COMM_HANDLER_EKI_H
+#endif // KUKA_COMM_HANDLER_EKIBIN_H

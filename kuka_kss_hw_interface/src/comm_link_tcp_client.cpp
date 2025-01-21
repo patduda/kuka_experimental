@@ -115,13 +115,13 @@ bool CommLink_TCPClient::setup()
     double timeout=5.0;
     if (nh_.getParam(param_timeout_, timeout))
     {
-      ROS_INFO_STREAM_NAMED(get_logging_id(), "Configuring Kuka EKI hardware interface socket timeout to "
+      ROS_INFO_STREAM_NAMED(get_logging_id(), "Configuring Kuka TCP hardware interface socket timeout to "
                             << timeout << " seconds");
       tcp_timeout_.fromSec(timeout);  // [s]; settable by parameter (default = 5)
     }
     else
     {
-      ROS_INFO_STREAM_NAMED(get_logging_id(), "Failed to get EKI socket timeout from parameter server (looking "
+      ROS_INFO_STREAM_NAMED(get_logging_id(), "Failed to get TCP socket timeout from parameter server (looking "
                             "for '" + param_timeout_ + "'), defaulting to " +
                             std::to_string(tcp_timeout_.toSec())  + " seconds");
     }
@@ -131,17 +131,39 @@ bool CommLink_TCPClient::setup()
 
 bool CommLink_TCPClient::start()
 {
-    boost::asio::ip::tcp::resolver resolver(ios_);
-    tcp_server_endpoint_ = *resolver.resolve({boost::asio::ip::tcp::v4(), server_address_, server_port_});
-    local_client_socket_.connect(tcp_server_endpoint_);
-    is_connected_ = local_client_socket_.is_open();
-    if (is_connected_)
-    {
-        local_client_socket_.non_blocking(true);
-        updateTimeStamp();
+    try {
+        boost::asio::ip::tcp::resolver resolver(ios_);
+        tcp_server_endpoint_ = *resolver.resolve({boost::asio::ip::tcp::v4(), server_address_, server_port_});
+        local_client_socket_.connect(tcp_server_endpoint_);
+        is_connected_ = local_client_socket_.is_open();
+        if (is_connected_)
+        {
+            local_client_socket_.non_blocking(true);
+            updateTimeStamp();
+        }
+    } catch (boost::system::system_error err) {
+            is_connected_ = false;
+            ROS_INFO_NAMED(get_logging_id(), "Kuka TCP hardware interface socket exception on open: %s", err.what());
     }
     return(is_connected_);
 }
+
+bool CommLink_TCPClient::stop()
+{
+    try {
+        if (local_client_socket_.is_open())
+        {
+            local_client_socket_.close();
+        }
+        is_connected_ = local_client_socket_.is_open();
+    } catch (boost::system::system_error err) {
+            is_connected_ = false;
+            ROS_INFO_NAMED(get_logging_id(), "Kuka TCP hardware interface socket exception on close: %s", err.what());
+    }
+
+    return(is_connected_);
+}
+
 
 size_t CommLink_TCPClient::receive(std::string& buffer)
 {

@@ -1,11 +1,11 @@
 &ACCESS RVO2
-&REL 11735
+&REL 13769
 &PARAM DISKPATH = KRC:\R1\Program\ROS
 def  kuka_ros_driver()
 
    ; Software License Agreement (BSD License)
    ;
-   ; Copyright (c) 2022, Kuka Robotics Corp
+   ; Copyright (c) 2018, Kuka Robotics Corp
    ; All rights reserved.
    ;
    ; Redistribution and use in source and binary forms, with or without
@@ -34,7 +34,7 @@ def  kuka_ros_driver()
 
    ; Author: Pat Duda <pat.duda@kuka.com>
    
-   ; Dependent on modules: SPS_Utils, ProgramControl, ProgCtrl_handler, ProgCtrlExec
+   ; Dependent on modules: SPS_Utils 
 
 
 
@@ -67,7 +67,7 @@ END
 GLOBAL DEF ROS_SPS_Init()
 BOOL idFound
 ;$AXIS_TYPE
-   ROS_InterfaceVersion = 2003
+   ROS_InterfaceVersion = 2004
    ProgCtrl_HandlerInit(5)
    
    ; Initialize the Op State to #KRL_PTP
@@ -85,6 +85,7 @@ BOOL idFound
    CQ_Reset(OpState_q)
    CQ_Reset(CMDlist_q)
    CQ_Reset(JPosList_q)
+   ROS_CommandListSetup()
    
    lock_data_collect = FALSE
    lock_data_read = FALSE
@@ -94,7 +95,7 @@ BOOL idFound
    n_DataCollect = 0
    t_DataCollect = 0
    ROS_write_cycle = 0.0
-   ROS_Interval=48 ;millisec
+   ROS_Interval=20 ;millisec
    ROS_IntervalDC=ROS_Interval
    ROS_NextTrigDC = $ROB_TIMER
    ; Init the status code for quick checking
@@ -104,6 +105,84 @@ BOOL idFound
    ROSCOM_ServerInit()
    ROSCOM_ServerStart()
 END
+
+
+DEF ROS_CommandListSetup()
+INT id
+
+   ROS_CommandListClear()
+   ; Group receive commands first because search for a received command will terminate at send commands
+   id = ROS_CommandRegister("Connect-", #ROSC_Init,     TRUE)
+   id = ROS_CommandRegister("CmdJpos-", #ROSC_CmdJpos,  TRUE)
+   id = ROS_CommandRegister("Start---", #ROSC_Start,    TRUE)
+   id = ROS_CommandRegister("Stop----", #ROSC_Stop,     TRUE)
+   id = ROS_CommandRegister("Reset---", #ROSC_Reset,    TRUE)
+   id = ROS_CommandRegister("DriveOn-", #ROSC_DrivesOn, TRUE)
+   id = ROS_CommandRegister("DriveOff", #ROSC_DrivesOff,TRUE)
+   id = ROS_CommandRegister("Change--", #ROSC_Change,   TRUE)
+   id = ROS_CommandRegister("HB------", #ROSC_Heartbeat,TRUE)
+   ; Register send commands
+   ROS_Cmd_____Init = ROS_CommandRegister("Init----", #ROSC_SInit,     FALSE)
+   ROS_Cmd_InitName = ROS_CommandRegister("InitName", #ROSC_SInitName, FALSE)
+   ROS_Cmd__InitMod = ROS_CommandRegister("InitMod-", #ROSC_SInitMod,  FALSE)
+   ROS_Cmd_InitRobV = ROS_CommandRegister("InitRobV", #ROSC_SInitRobV, FALSE)
+   ROS_Cmd___JState = ROS_CommandRegister("JState--", #ROSC_SjState,   FALSE)
+   ROS_Cmd___Status = ROS_CommandRegister("Status--", #ROSC_Sstatus,   FALSE)
+   ROS_Cmd_____Ackn = ROS_CommandRegister("Ack-----", #ROSC_Sackn,     FALSE)
+
+END
+
+DEF ROS_CommandListClear()
+INT ci
+
+   FOR ci = 1 TO ROS_MaxCommands
+      ROS_CommandTypes[ci] = ROS_EmptyCommand
+   ENDFOR
+   ROS_NumCommands = 0
+END
+
+DEFFCT INT ROS_CommandRegister(name[]:IN, type:IN, isRecv:IN)
+DECL ROS_CommandType type
+DECL CHAR name[]
+DECL BOOL isRecv
+   ROS_NumCommands = ROS_NumCommands + 1
+   IF (ROS_NumCommands > ROS_MaxCommands) THEN
+      ROS_NumCommands = ROS_MaxCommands
+      MsgNotify("WARNING. Too many commands registered!")
+      RETURN(ROS_MaxCommands+1)
+   ENDIF
+   
+   ROS_CommandTypes[ROS_NumCommands].type = type
+   ROS_CommandTypes[ROS_NumCommands].IDstr[] = name[]
+   ROS_CommandTypes[ROS_NumCommands].isRecv = isRecv
+
+   RETURN(ROS_NumCommands)
+ENDFCT
+
+
+GLOBAL DEFFCT INT ROS_CommandTypeFind(name[]:IN, onlyRecv:IN)
+DECL CHAR name[]
+BOOL onlyRecv
+INT ci
+BOOL found
+
+   found = FALSE
+   ; Terminate search when command is found or when no more receive commands 
+   FOR ci = 1 TO ROS_MaxCommands
+      IF (StrComp(name[], ROS_CommandTypes[ci].IDstr[], #NOT_CASE_SENS)) THEN
+         found = TRUE
+         EXIT
+      ENDIF
+      IF (onlyRecv AND NOT ROS_CommandTypes[ci].isRecv) THEN
+         EXIT
+      ENDIF
+   ENDFOR
+   IF (NOT found) THEN
+      RETURN(ROS_MaxCommands+1)
+   ENDIF
+
+   RETURN(ci)
+ENDFCT
 
 
 
@@ -174,33 +253,16 @@ BOOL idFound
       ; Check for received messages
       ROSCOM_ReceiveData()
 
-      ; ROS_CommFromSPS is a special hack to get better cycle performance from EKI XML
-      ; by handling send in the robot interpreter interrupt. A future change to binary comm 
-      ; may make this unnecessary.
-      ; Handle fail-over for main run program stop
-      IF (($PRO_STATE1==#P_ACTIVE) AND (ROS_CurrentOpState==#KRL_PTP)) THEN
-         ROS_CommFromSPS = FALSE
-      ELSE
-         ROS_CommFromSPS = TRUE
-         lock_data_read = FALSE
-         lock_cmdPos_read = FALSE
+      ; Send robot state from SPS
+      IF ((ROS_DoSendTrig == TRUE) AND (ROS_DidInit==TRUE)) THEN
+         ROSCOM_Send_Jstate(FALSE)
       ENDIF
-      
-      ;ROS_CommFromSPS = TRUE ; For debug
-      IF (ROS_CommFromSPS) THEN
-         ; Send robot state from SPS
-         IF ((ROS_DoSendTrig == TRUE) AND (ROS_DidInit==TRUE)) THEN
-            ROSCOM_Send_Jstate(FALSE)
-         ENDIF
-      ENDIF
-         
       
       ; Monitor robot status signals & send as changed
       ROS_GetStatusData(ROS_RobotStatus)
       IF (SPSchg_iChanged(ROSSTAT_Code_ID, ROS_RobotStatus.statCode)) THEN
-         ROSCOM_Send_Status(ROS_RobotStatus)
+         ROSCOM_Send_Status(ROS_IPOC, ROS_RobotStatus)
       ENDIF
-      
    ELSE ; not connected
       ;Stop robot
       ;Detect initial client connection
@@ -408,34 +470,91 @@ END
 
 ; Code to exec at SPS startup to initialize the communication link
 DEF ROSCOM_ServerInit()
-   ROS_EKI_ServerInit()
+   SWITCH (ROS_EKI_COMM_MODE)
+      CASE 1
+         ROS_EKI_ServerInit()
+      CASE 2
+         ROS_EKIB_ServerInit()
+      DEFAULT
+         MsgNotify("Error: Bad ROS_EKI_COMM_MODE setting.", "Debug", ,, 100)
+         HALT
+   ENDSWITCH
 END
 
 
 ; Startup the server
 DEF ROSCOM_ServerStart()
-   ROS_EKI_ServerStart()
+   SWITCH (ROS_EKI_COMM_MODE)
+      CASE 1
+         ROS_EKI_ServerStart()
+      CASE 2
+         ROS_EKIB_ServerStart()
+      DEFAULT
+         MsgNotify("Error: Bad ROS_EKI_COMM_MODE setting.", "Debug", ,, 100)
+         HALT
+   ENDSWITCH
 END
 
 ; Reset the server connections
 DEF ROSCOM_ServerReset()
-   ROS_EKI_ServerReset()
+   SWITCH (ROS_EKI_COMM_MODE)
+      CASE 1
+         ROS_EKI_ServerReset()
+      CASE 2
+         ROS_EKIB_ServerReset()
+      DEFAULT
+         MsgNotify("Error: Bad ROS_EKI_COMM_MODE setting.", "Debug", ,, 100)
+         HALT
+   ENDSWITCH
 END
 
 ; Test the communication connection state.  TRUE=Connected 
 DEFFCT BOOL ROSCOM_IsConn()
-   RETURN(ROS_EKI_IsConn())
+   BOOL ret
+   SWITCH (ROS_EKI_COMM_MODE)
+      CASE 1
+         ret = ROS_EKI_IsConn()
+      CASE 2
+         ret = ROS_EKIB_IsConn()
+      DEFAULT
+         MsgNotify("Error: Bad ROS_EKI_COMM_MODE setting.", "Debug", ,, 100)
+         ret = FALSE
+         HALT
+   ENDSWITCH
+   RETURN(ret)
 ENDFCT
 
 ; Detect a connect->disconnect transition
 GLOBAL DEFFCT BOOL ROSCOM_ChkDisconn()
-   RETURN(ROS_EKI_ChkDisconn())
+   BOOL ret
+   SWITCH (ROS_EKI_COMM_MODE)
+      CASE 1
+         ret = ROS_EKI_ChkDisconn()
+      CASE 2
+         ret = ROS_EKIB_ChkDisconn()
+      DEFAULT
+         MsgNotify("Error: Bad ROS_EKI_COMM_MODE setting.", "Debug", ,, 100)
+         ret = TRUE
+         HALT
+   ENDSWITCH
+   RETURN(ret)
 ENDFCT
 
 
 ; Detect a disconnect->connect transition
 GLOBAL DEFFCT BOOL ROSCOM_ChkConnect()
-   RETURN(ROS_EKI_ChkConnect())
+   BOOL ret
+   SWITCH (ROS_EKI_COMM_MODE)
+      CASE 1
+         ret = ROS_EKI_ChkConnect()
+      CASE 2
+         ret = ROS_EKIB_ChkConnect()
+      DEFAULT
+         MsgNotify("Error: Bad ROS_EKI_COMM_MODE setting.", "Debug", ,, 100)
+         ret = FALSE
+         HALT
+   ENDSWITCH
+   RETURN(ret)
 ENDFCT
 
 
@@ -453,14 +572,31 @@ DEF ROSCOM_Send_InitData()
    ; No mxA support for now
    ROS_SupportFeatures.MXA = 0
    
-   ROS_EKI_Send_InitData(ROS_InterfaceVersion, ROS_IPOC, $NUM_AX, $EX_AX_NUM, $KR_SERIALNO, $ROBNAME[], $ROBTRAFO[],$V_R1MADA[],ROS_SupportFeatures, $AXIS_TYPE[], $VEL_AXIS_MA[], $RAT_MOT_AX[])
+   SWITCH (ROS_EKI_COMM_MODE)
+      CASE 1
+         ROS_EKI_Send_InitData(ROS_InterfaceVersion, ROS_IPOC, $NUM_AX, $EX_AX_NUM, $KR_SERIALNO, $ROBNAME[], $ROBTRAFO[],$V_R1MADA[],ROS_SupportFeatures, $AXIS_TYPE[], $VEL_AXIS_MA[], $RAT_MOT_AX[])
+      CASE 2
+         ROS_EKIB_Send_InitData(ROS_InterfaceVersion, ROS_IPOC, $NUM_AX, $EX_AX_NUM, $KR_SERIALNO, $ROBNAME[], $ROBTRAFO[],$V_R1MADA[],ROS_SupportFeatures, $AXIS_TYPE[], $VEL_AXIS_MA[], $RAT_MOT_AX[])
+      DEFAULT
+         MsgNotify("Error: Bad ROS_EKI_COMM_MODE setting.", "Debug", ,, 100)
+         HALT
+   ENDSWITCH
 END
 
 
 ; Send communication message containing the robot status info.
-DEF ROSCOM_Send_Status(RobStat:IN)
+DEF ROSCOM_Send_Status(ipoTime:IN, RobStat:IN)
+   DECL INT ipoTime
    DECL ROS_RobStatusType RobStat
-   ROS_EKI_Send_Status(RobStat)
+   SWITCH (ROS_EKI_COMM_MODE)
+      CASE 1
+         ROS_EKI_Send_Status(ipoTime, RobStat)
+      CASE 2
+         ROS_EKIB_Send_Status(ipoTime, RobStat)
+      DEFAULT
+         MsgNotify("Error: Bad ROS_EKI_COMM_MODE setting.", "Debug", ,, 100)
+         HALT
+   ENDSWITCH
 END
 
 ; Send communication message containing the robot joint state info.
@@ -493,8 +629,16 @@ DEF ROSCOM_Send_Jstate(check_lock:IN)
       write_start = $ROB_TIMER
    
       ; Call out to communication routine.
-      ROS_EKI_Send_Jstate(ipo_time, pos_data, vel_data, torque_data)
-
+      SWITCH (ROS_EKI_COMM_MODE)
+         CASE 1
+            ROS_EKI_Send_Jstate(ipo_time, pos_data, vel_data, torque_data)
+         CASE 2
+            ROS_EKIB_Send_Jstate(ipo_time, pos_data, vel_data, torque_data)
+         DEFAULT
+            MsgNotify("Error: Bad ROS_EKI_COMM_MODE setting.", "Debug", ,, 100)
+            HALT
+      ENDSWITCH
+   
       ; Force false to prepare for next rising edge.
       ROS_DoSendTrig = FALSE
       write_end = $ROB_TIMER
@@ -520,7 +664,14 @@ END
 DEF ROSCOM_SendAck(cmd[]:IN, cmdID:IN)
    DECL CHAR cmd[]
    DECL INT cmdID
-   ROS_EKI_SendAck(cmd[], cmdID)
+      SWITCH (ROS_EKI_COMM_MODE)
+         CASE 1
+            ROS_EKI_SendAck(cmd[], cmdID)
+         CASE 2
+            ROS_EKIB_SendAck(cmd[], cmdID)
+         DEFAULT
+            HALT
+      ENDSWITCH
 END
 
 
@@ -530,7 +681,15 @@ END
 ;  - ROS_LogOpModeCmd()
 ;  - ROS_LogCommand()
 DEF ROSCOM_ReceiveData()
-   ROS_EKI_ReceiveData()
+   SWITCH (ROS_EKI_COMM_MODE)
+      CASE 1
+         ROS_EKI_ReceiveData()
+      CASE 2
+         ROS_EKIB_ReceiveData()
+      DEFAULT
+         MsgNotify("Error: Bad ROS_EKI_COMM_MODE setting.", "Debug", ,, 100)
+         HALT
+   ENDSWITCH
 END
 
 
@@ -721,7 +880,7 @@ DECL BOOL mainExec
 
             ROSCOM_Send_InitData()
             ROSCOM_Send_Jstate(FALSE)
-            ROSCOM_Send_Status(ROS_RobotStatus)
+            ROSCOM_Send_Status(ROS_IPOC, ROS_RobotStatus)
             ROS_RequestOpState(#KRL_PTP )
             ROS_DidInit=TRUE
          CASE #ROSC_CmdJpos

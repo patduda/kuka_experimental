@@ -1,10 +1,10 @@
 &ACCESS RV2
-&REL 3
+&REL 5
 &PARAM DISKPATH = KRC:\R1\Program\ROS
 DEF kuka_ros_comm_EKIXML ( )
    ; Software License Agreement (BSD License)
    ;
-   ; Copyright (c) 2022, Kuka Robotics Corp
+   ; Copyright (c) 2018, Kuka Robotics Corp
    ; All rights reserved.
    ;
    ; Redistribution and use in source and binary forms, with or without
@@ -32,6 +32,8 @@ DEF kuka_ros_comm_EKIXML ( )
    ; POSSIBILITY OF SUCH DAMAGE.
 
    ; Author: Pat Duda <pat.duda@kuka.com>
+   
+   ; Dependent on modules: SPS_Utils 
 
 
 END
@@ -290,7 +292,8 @@ END
 
 ; Send status code data.  RobStat should already be populated with current state
 ; from the routine ROS_GetStatusData()
-GLOBAL DEF ROS_EKI_Send_Status(RobStat:IN)
+GLOBAL DEF ROS_EKI_Send_Status(ipoTime:IN, RobStat:IN)
+   DECL INT ipoTime
    DECL ROS_RobStatusType RobStat
    DECL EKI_STATUS eki_ret
 
@@ -298,6 +301,7 @@ GLOBAL DEF ROS_EKI_Send_Status(RobStat:IN)
       RETURN
    ENDIF
 
+   eki_ret = eki_setInt(InterfaceName[], "Robot/Status/@IPOC", ipoTime)
    eki_ret = eki_setInt(InterfaceName[], "Robot/Status/@Mode", RobStat.Mode)
    
    ; Transmit the current Run Mode 
@@ -341,6 +345,7 @@ GLOBAL DEF ROS_EKI_ReceiveData()
    DECL EKI_Status eki_ret
    DECL EKI_Status eki_ret_req
    DECL E6AXIS joint_pos_cmd
+   DECL INT idxCmdType
    DECL INT idx
    DECL INT cmdID
    DECL REAL dTime
@@ -367,8 +372,12 @@ GLOBAL DEF ROS_EKI_ReceiveData()
       dTime = 0.2
       eki_ret = eki_getINT(InterfaceName[], "ROS/@ID", cmdID)
       
+      idxCmdType = ROS_CommandTypeFind(RecvType[], TRUE)
+      
+      SWITCH(ROS_CommandTypes[idxCmdType].type)
       ; Command data
-      IF (StrComp(RecvType[], "CMD", #NOT_CASE_SENS)) THEN
+      ;IF (StrComp(RecvType[], "CMD", #NOT_CASE_SENS)) THEN
+      CASE #ROSC_CmdJpos
          ; Init data - uninit data causes EKI error
          joint_pos_cmd = ROS_joint_pos_tgt
          eki_ret = eki_getReal(InterfaceName[], "ROS/Command/@dt", dTime)
@@ -386,50 +395,61 @@ GLOBAL DEF ROS_EKI_ReceiveData()
          eki_ret = eki_getReal(InterfaceName[], "ROS/Command/Pos/@E6", joint_pos_cmd.E6)
          
          ROS_LogTargetPosCmd(joint_pos_cmd, cmdID, dTime)
-      ENDIF 
+      ;ENDIF 
       
       ; Program STOP command
-      IF (StrComp(RecvType[], "STOP", #NOT_CASE_SENS)) THEN
+      ;IF (StrComp(RecvType[], "STOP", #NOT_CASE_SENS)) THEN
+      CASE #ROSC_Stop
          idx = ROS_LogCommand(#ROSC_Stop, cmdID)
-      ENDIF
+      ;ENDIF
    
       ; Program Start
-      IF (StrComp(RecvType[], "START", #NOT_CASE_SENS)) THEN
+      ;IF (StrComp(RecvType[], "START", #NOT_CASE_SENS)) THEN
+      CASE #ROSC_Start
          idx = ROS_LogCommand(#ROSC_Start, cmdID)
-      ENDIF
+      ;ENDIF
    
       ; Drives OFF
-      IF (StrComp(RecvType[], "DRIV_OFF", #NOT_CASE_SENS)) THEN
+      ;IF (StrComp(RecvType[], "DRIV_OFF", #NOT_CASE_SENS)) THEN
+      CASE #ROSC_DrivesOff
          idx = ROS_LogCommand(#ROSC_DrivesOff, cmdID)
-      ENDIF
+      ;ENDIF
    
       ; Drives ON
-      IF (StrComp(RecvType[], "DRIV_ON", #NOT_CASE_SENS)) THEN
+      ;IF (StrComp(RecvType[], "DRIV_ON", #NOT_CASE_SENS)) THEN
+      CASE #ROSC_DrivesOn
          idx = ROS_LogCommand(#ROSC_DrivesOn, cmdID)
-      ENDIF
+      ;ENDIF
    
       ; Program Reset
-      IF (StrComp(RecvType[], "RESET", #NOT_CASE_SENS)) THEN
+      ;IF (StrComp(RecvType[], "RESET", #NOT_CASE_SENS)) THEN
+      CASE #ROSC_Reset
          idx = ROS_LogCommand(#ROSC_Reset, cmdID)
-      ENDIF
+      ;ENDIF
       
       ; HEARTBEAT command to keep link alive
-      IF (StrComp(RecvType[], "HEARTBEAT", #NOT_CASE_SENS)) THEN
+      ;IF (StrComp(RecvType[], "HEARTBEAT", #NOT_CASE_SENS)) THEN
+      CASE #ROSC_HeartBeat
          idx = ROS_LogCommand(#ROSC_Heartbeat, cmdID)
-      ENDIF
+      ;ENDIF
    
       ; Change operation mode
-      IF (StrComp(RecvType[], "CHANGE", #NOT_CASE_SENS)) THEN
+      ;IF (StrComp(RecvType[], "CHANGE", #NOT_CASE_SENS)) THEN
+      CASE #ROSC_Change
          eki_ret = eki_GetString(InterfaceName[], "ROS/OpState/@Type", ReqOpState[])
          
          ROS_LogOpModeCmd(ReqOpState[], cmdID)
-      ENDIF
+      ;ENDIF
       
       ; Initial connect
-      IF (StrComp(RecvType[], "CON", #NOT_CASE_SENS)) THEN
+      ;IF (StrComp(RecvType[], "CON", #NOT_CASE_SENS)) THEN
+      CASE #ROSC_Init
          ; Send initialization data back
          idx = ROS_LogCommand(#ROSC_Init, cmdID)
-      ENDIF
+     ;ENDIF
+      DEFAULT
+          MsgNotify("WARNING:ROS_EKI unknown command type received.")
+     ENDSWITCH
    ENDWHILE
    SkipRecv:
    ; When all data is read, reset the receive flag

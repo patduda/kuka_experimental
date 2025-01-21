@@ -14,7 +14,7 @@
 
   <buildtool_depend>catkin</buildtool_depend>
 
-  <build_depend>cmake_modules</build_depend>
+  <build_depend>cmake_modules kuka_msgs</build_depend>
 
   <depend>controller_manager</depend>
   <depend>hardware_interface</depend>

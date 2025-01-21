@@ -2,7 +2,7 @@
    <CONFIG>
       <IP_NUMBER>172.32.1.243</IP_NUMBER>   <!-- IP-number of the external socket -->
       <PORT>49152</PORT>                   <!-- Port-number of the external socket -->      
-      <SENTYPE>V2003ROS</SENTYPE>        <!-- The name of your system send in <Sen Type="" > -->     
+      <SENTYPE>V2004ROS</SENTYPE>        <!-- The name of your system send in <Sen Type="" > -->     
       <ONLYSEND>FALSE</ONLYSEND>       <!-- TRUE means the client don't expect answers. Do not send anything to robot -->
    </CONFIG>
     <!-- Software License Agreement (BSD License)                                        -->

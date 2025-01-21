@@ -95,21 +95,42 @@ bool CommLink_UDPServer::setup()
 
 bool CommLink_UDPServer::start()
 {
-    local_server_socket_.open(boost::asio::ip::udp::v4());
+    try {
+        local_server_socket_.open(boost::asio::ip::udp::v4());
 
-    //int svr_port = std::stoi(local_server_port_);
-    //local_server_endpoint_.port(local_server_port_);
-    local_server_endpoint_ = boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), local_server_port_);
+        //int svr_port = std::stoi(local_server_port_);
+        //local_server_endpoint_.port(local_server_port_);
+        local_server_endpoint_ = boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), local_server_port_);
 
-    boost::system::error_code ec = boost::asio::error::fault;
+        boost::system::error_code ec = boost::asio::error::fault;
 
-    local_server_socket_.bind(local_server_endpoint_, ec);
-    ROS_INFO_NAMED(get_logging_id(), "Server socket bind ec=%s", ec.message().c_str());
+        local_server_socket_.bind(local_server_endpoint_, ec);
+        ROS_INFO_NAMED(get_logging_id(), "Kuka Server socket bind ec=%s", ec.message().c_str());
 
-    local_server_socket_.non_blocking(true);
+        local_server_socket_.non_blocking(true);
 
-    ROS_INFO_NAMED(get_logging_id(), "UDP Server listening on port %d", local_server_port_);
-    is_connected_ = local_server_socket_.is_open();
+        ROS_INFO_NAMED(get_logging_id(), "Kuka UDP Server listening on port %d", local_server_port_);
+        is_connected_ = local_server_socket_.is_open();
+    } catch (boost::system::system_error err) {
+        is_connected_ = false;
+        ROS_INFO_NAMED(get_logging_id(), "Kuka UDP hardware interface socket exception on open: %s", err.what());
+    }
+    return(is_connected_);
+}
+
+bool CommLink_UDPServer::stop()
+{
+    try {
+        if (local_server_socket_.is_open())
+        {
+            local_server_socket_.close();
+        }
+        is_connected_ = local_server_socket_.is_open();
+    } catch (boost::system::system_error err) {
+            is_connected_ = false;
+            ROS_INFO_NAMED(get_logging_id(), "Kuka UDP hardware interface socket exception on close: %s", err.what());
+    }
+
     return(is_connected_);
 }
 

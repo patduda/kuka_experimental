@@ -38,6 +38,7 @@
  * Based on kuka_rsi_hw_interface from: Lars Tingelstad <lars.tingelstad@ntnu.no>
  */
 
+#include <kuka_kss_hw_interface/kuka_commands.h>
 #include <kuka_kss_hw_interface/kuka_robot_state_manager.h>
 #include <kuka_kss_hw_interface/kuka_kss_hw_interface.h>
 #include <kuka_kss_hw_interface/comm_link_tcp_client.h>
@@ -157,7 +158,9 @@ void KukaKssHardwareInterface::controlLoop(controller_manager::ControllerManager
             if (rob_connection_->getCommState() != KukaCommHandler::KukaCommState::CONNECTED)
             {
                 ROS_WARN_THROTTLE_NAMED(30.0, log_name_, "EKI Server Connection lost.  Attempting to reconnect.");
-                std::this_thread::sleep_for(std::chrono::microseconds(500000));
+                rob_connection_->shutdownComm();
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(1500));
                 start();
                 // TODO: Reconnect causes exception: "Transport endpoint is already connected".  Need to add disconnect method to CommunicationLink class (communication_link.h)
             }
@@ -182,12 +185,17 @@ void KukaKssHardwareInterface::controlLoop(controller_manager::ControllerManager
                 t_since_remote_start =  timestamp - rsi_remote_start_time_;
                 if (t_since_remote_start.toSec() > 0.5)
                 {
-                    do_send_start = true;
+                    if (KukaRobotStateManager::getRobot(robot_state_id_).getRobRunState() != KukaRobotState::KukaRunState::Running)
+                        do_send_start = true;
                 }
                 if (do_send_start)
                 {
+                    rob_connection_->messagePrepareCommand(kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_Reset), KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
+                    rob_connection_->messageSend();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(4));
+
                     rsi_remote_start_time_ = timestamp;
-                    rob_connection_->messagePrepareCommand("START", KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
+                    rob_connection_->messagePrepareCommand(kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_Start), KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
                     rob_connection_->messageSend();
                     ROS_INFO_NAMED( log_name_, "RSI Sending START command.");
                     rsi_did_startup_ = false;
@@ -244,7 +252,7 @@ void KukaKssHardwareInterface::controlLoop(controller_manager::ControllerManager
                 // Keep the connection alive with a heartbeat every 1.5s
                 if (tcp_to_robot_.time_since_last_comm().toSec() > 1.5)
                 {
-                    rob_connection_->messagePrepareCommand("HEARTBEAT", KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
+                    rob_connection_->messagePrepareCommand(kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_Heartbeat), KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
                     rob_connection_->messageSend();
                 }
 
@@ -408,37 +416,60 @@ void KukaKssHardwareInterface::start()
 {
     ROS_INFO_THROTTLE_NAMED(5.0, log_name_, "Waiting for robot EKI server...");
     bool successConnect = rob_connection_->startComm();
-    if (!successConnect)
+    while (!successConnect)
     {
-        ROS_INFO_THROTTLE_NAMED(5.0, log_name_, "EKI server connect failed!");
-        return;
+        ROS_WARN_NAMED(log_name_, "EKI Server Connection failed.  Attempting to reconnect.");
+        rob_connection_->shutdownComm();
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        successConnect = rob_connection_->startComm();
     }
-    else
-    {
-        ROS_INFO_NAMED(log_name_, "EKI server connected. Initializing communication.");
-    }
-    rob_connection_->messagePrepareCommand("CON", 0);
+    ROS_INFO_NAMED(log_name_, "EKI server connected. Initializing communication.");
+
+    rob_connection_->messagePrepareCommand(kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_Init), 0);
     rob_connection_->messageSend();
     //ROS_INFO_NAMED(log_name_, "Sent initial EKI connection message.");
 
     //Wait until we get data
     bool received_message = false;
     // Expect 3 initialization messages: Init, Status, State
-    // TODO: add tracking of last message type in kuka_comm_handler_eki.  Change this while loop to validate that all 3 types were received.
+    // tracking of last message type in kuka_comm_handler_eki.  Change this while loop to validate that all 3 types were received.
+    kuka_commands& cmdNames = kuka_commands::getInstance();
+    bool gotInit1 = false;
+    bool gotInit2 = false;
+    bool gotInit3 = false;
+    bool gotInit4 = false;
+    bool gotStatus = false;
+    bool gotState = false;
+
     int message_count=0;
-    while(message_count < 3)
+    while(message_count < 15)
     {
         received_message = rob_connection_->checkForReceive();
         if (received_message)
         {
-            ROS_INFO_NAMED(log_name_, "start:Received message %d from robot.", message_count);
+            ROS_DEBUG_NAMED(log_name_, "start:Received message %d from robot.", message_count);
             received_message = rob_connection_->parseReceivedMessage();
             message_count++;
+            gotInit1 = (cmdNames.getTimestamp(kuka_commands::ROSC_SInit) > 0);
+            ROS_DEBUG_NAMED(log_name_, "start:ROSC_SInit ts = %lld.", cmdNames.getTimestamp(kuka_commands::ROSC_SInit));
+            gotInit2 = (cmdNames.getTimestamp(kuka_commands::ROSC_SInitMod) > 0);
+            ROS_DEBUG_NAMED(log_name_, "start:ROSC_SInitMod ts = %lld.", cmdNames.getTimestamp(kuka_commands::ROSC_SInitMod));
+            gotInit3 = (cmdNames.getTimestamp(kuka_commands::ROSC_SInitName) > 0);
+            ROS_DEBUG_NAMED(log_name_, "start:ROSC_SInitName ts = %lld.", cmdNames.getTimestamp(kuka_commands::ROSC_SInitName));
+            gotInit4 = (cmdNames.getTimestamp(kuka_commands::ROSC_SInitRobV) > 0);
+            ROS_DEBUG_NAMED(log_name_, "start:ROSC_SInitRobV ts = %lld.", cmdNames.getTimestamp(kuka_commands::ROSC_SInitRobV));
+            gotStatus = (cmdNames.getTimestamp(kuka_commands::ROSC_Sstatus) > 0);
+            ROS_DEBUG_NAMED(log_name_, "start:ROSC_Sstatus ts = %lld.", cmdNames.getTimestamp(kuka_commands::ROSC_Sstatus));
+            gotState = (cmdNames.getTimestamp(kuka_commands::ROSC_SjState) > 0);
+            ROS_DEBUG_NAMED(log_name_, "start:ROSC_SjState ts = %lld.", cmdNames.getTimestamp(kuka_commands::ROSC_SjState));
+            // When all the necessary init messages are received, exit the loop
+            if (gotInit1 && gotInit2 && gotInit3 && gotInit4 && gotStatus && gotState)
+                break;
         }
         else
             std::this_thread::sleep_for(std::chrono::microseconds(500));
     }
-    //ROS_INFO_NAMED(log_name_, "Received INIT response.");
 
     rob_connection_->checkReceivedVersion();
 
@@ -520,7 +551,6 @@ void KukaKssHardwareInterface::startRSI()
 
         rsi_did_startup_ = true;
     }
-
 }
 
 void KukaKssHardwareInterface::configure()
@@ -536,7 +566,11 @@ void KukaKssHardwareInterface::configure()
     KukaRobotStateManager::getRobot(robot_state_id_).getRobotInfo().controller.address = serverIP;
     KukaRobotStateManager::getRobot(robot_state_id_).getRobotInfo().robots[0].address = serverIP;
 
+#ifdef EKI_COMM_XML
     rob_connection_.reset(new KukaCommHandlerEKI(tcp_to_robot_, robot_state_id_, 2, nh_, log_name_));
+#elif defined(EKI_COMM_BIN)
+    rob_connection_.reset(new KukaCommHandlerEKIBIN(tcp_to_robot_, robot_state_id_, 2, nh_, log_name_));
+#endif
     rob_connection_->setup();
 
     rsi_connection_.reset(new KukaCommHandlerRSI(udp_server_, robot_state_id_, 1, nh_, log_name_));
@@ -581,7 +615,7 @@ bool KukaKssHardwareInterface::startMotionCB(industrial_msgs::StartMotion::Reque
     KukaRobotState::KukaOpMode opMode = KukaRobotStateManager::getRobot(robot_state_id_).getOpMode();
     if (opMode == KukaRobotState::KukaOpMode::Ext)
     {
-        rob_connection_->messagePrepareCommand("START", KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
+        rob_connection_->messagePrepareCommand(kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_Start), KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
         rob_connection_->messageSend();
         response.code.val = industrial_msgs::ServiceReturnCode::SUCCESS;
     }
@@ -598,7 +632,7 @@ bool KukaKssHardwareInterface::stopMotionCB(industrial_msgs::StopMotion::Request
                                             industrial_msgs::StopMotion::Response &response)
 {
     ROS_INFO_STREAM_NAMED(log_name_, "KukaKssHardwareInterface--Calling service: stop_motion.");
-    rob_connection_->messagePrepareCommand("STOP", KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
+    rob_connection_->messagePrepareCommand(kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_Stop), KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
     rob_connection_->messageSend();
 
     // debug: always success.
@@ -611,7 +645,7 @@ bool KukaKssHardwareInterface::resetCB(std_srvs::Empty::Request &request,
                                        std_srvs::Empty::Response &response)
 {
     ROS_INFO_STREAM_NAMED(log_name_, "KukaKssHardwareInterface--Calling service: reset.");
-    rob_connection_->messagePrepareCommand("RESET", KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
+    rob_connection_->messagePrepareCommand(kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_Reset), KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
     rob_connection_->messageSend();
 
     return true;
@@ -622,7 +656,7 @@ bool KukaKssHardwareInterface::setDrivePowerOnCB(industrial_msgs::SetDrivePower:
                                                  industrial_msgs::SetDrivePower::Response &response)
 {
     ROS_INFO_STREAM_NAMED(log_name_, "KukaKssHardwareInterface--Calling service: enable_robot.");
-    rob_connection_->messagePrepareCommand("DRIV_ON", KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
+    rob_connection_->messagePrepareCommand(kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_DrivesOn), KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
     rob_connection_->messageSend();
 
     // debug: always success.
@@ -636,7 +670,7 @@ bool KukaKssHardwareInterface::setDrivePowerOffCB(industrial_msgs::SetDrivePower
                                                   industrial_msgs::SetDrivePower::Response &response)
 {
     ROS_INFO_STREAM_NAMED(log_name_, "KukaKssHardwareInterface--Calling service: disable_robot.");
-    rob_connection_->messagePrepareCommand("DRIV_OFF", KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
+    rob_connection_->messagePrepareCommand(kuka_commands::getInstance().getCommand(kuka_commands::CommandType::ROSC_DrivesOff), KukaRobotStateManager::getRobot(robot_state_id_).getIPOC());
     rob_connection_->messageSend();
 
     // debug: always success.

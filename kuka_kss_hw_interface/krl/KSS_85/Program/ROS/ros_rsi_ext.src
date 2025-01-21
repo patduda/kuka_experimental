@@ -1,4 +1,4 @@
-&ACCESS RVP
+&ACCESS RVO
 &PARAM EDITMASK = *
 &PARAM TEMPLATE = C:\KRC\Roboter\Template\vorgabe
 DEF ros_rsi_ext( )
@@ -51,7 +51,7 @@ DECL REAL InterfaceVersion
   ;ENDFOLD (USER INI)
 ;ENDFOLD (INI)
 
-InterfaceVersion = 2003
+InterfaceVersion = 2004
 ;ROS_CurrentOpState = #RSI4ms_Pos
 WAIT SEC 1.0
 
